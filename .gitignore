@@ -1,0 +1,2 @@
+models/backbones/pretrained/*
+__pycache__
