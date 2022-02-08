@@ -1,1 +1,1 @@
-from .model import ResNetSegmentationNet, UNet
+from .model import UNet

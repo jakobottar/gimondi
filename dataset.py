@@ -5,6 +5,7 @@ import pandas as pd
 import torchvision.transforms as transforms
 from skimage import io
 
+
 class SegmentationImageDataset(Dataset):
     def __init__(self, dataset_file, transform=None, target_transform=None):
         self.dataset = pd.read_csv(dataset_file)
@@ -16,7 +17,6 @@ class SegmentationImageDataset(Dataset):
 
     def __getitem__(self, idx):
         image_path = self.dataset.iloc[idx]['image_file']
-        # for some reason torchvision.io.read_image was not working? Why is this?
         image = io.imread(image_path)
         mask_path = self.dataset.iloc[idx]['mask_file']
         mask = io.imread(mask_path)
@@ -25,6 +25,7 @@ class SegmentationImageDataset(Dataset):
         if self.target_transform:
             mask = self.target_transform(mask)
         return image, mask
+
 
 class UnsupervisedSegmentationDataset(SegmentationImageDataset):
     def __getitem__(self, idx):

@@ -1,2 +1,5 @@
-models/backbones/pretrained/*
 __pycache__
+.python-version
+temp/*
+out/*
+runs/*
