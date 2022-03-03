@@ -10,9 +10,9 @@ from models.encoders import *
 
 class UNet(torch.nn.Module):
     r"""UNet - full U-Net architecture
-        args:
-            sup_loss: supervised loss function
-            unsup_loss: unsupervised loss function
+    args:
+        sup_loss: supervised loss function
+        unsup_loss: unsupervised loss function
     """
     """
             level_length: number of convolutional/relu layers to include on each layer (normally 2 or 3)
@@ -20,7 +20,6 @@ class UNet(torch.nn.Module):
             n_channels: number of channels the input is, usually 1 (grayscale) or 3 (RGB)
             n_clases: number of classes we predict
     """
-
 
     def __init__(self) -> None:
         super(UNet, self).__init__()
@@ -36,7 +35,6 @@ class UNet(torch.nn.Module):
 
         self.encoder = UNetEncoder(level_length, n_channels)
         self.main_decoder = UNetDecoder(level_length, n_classes)
-
 
     def _initialize_weights(self):
         filter_size = 3
@@ -54,10 +52,8 @@ class UNet(torch.nn.Module):
                 # torch.nn.init.kaiming_normal_(m.weight, a=0, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     torch.nn.init.constant_(m.bias, 0)
-    
 
     def forward(self, x):
         x = self.encoder(x)
         x = self.main_decoder(x)
-        return x 
-            
+        return x
