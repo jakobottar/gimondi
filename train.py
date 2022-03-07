@@ -29,7 +29,10 @@ if __name__ == "__main__":
         "--mode", type=str, default="semi", help="model mode (default: semi)"
     )
     parser.add_argument(
-        "--name", type=str, default="None", help="model name (default: random name)"
+        "--name", type=str, default=None, help="model name (default: random name)"
+    )
+    parser.add_argument(
+        "--pretrained", type=str, default=None, help="add a pretrained model here"
     )
     FLAGS = parser.parse_args()
 
@@ -45,7 +48,7 @@ if __name__ == "__main__":
         f"datasets loaded:\n    {len(sup_dataset)} labeled examples\n    {len(unsup_dataset)} unlabeled examples\n    {len(test_dataset)} testing examples"
     )
 
-    batch_size = 24
+    batch_size = 16
     test_dataloader = DataLoader(test_dataset, batch_size=4)
     sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
     unsup_dataloader = DataLoader(unsup_dataset, batch_size=batch_size, shuffle=True)
@@ -53,7 +56,10 @@ if __name__ == "__main__":
         sup_dataloader, unsup_dataloader, FLAGS.mode
     )
 
-    net = UNet()
+    if FLAGS.pretrained:
+        net = torch.load(FLAGS.pretrained)
+    else:
+        net = UNet()
     optimizer = torch.optim.AdamW(net.parameters(), lr=0.01, weight_decay=0.1)
     loss = nn.CrossEntropyLoss()
 

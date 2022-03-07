@@ -33,7 +33,7 @@ class Trainer:
         self.optimizer = optimizer
         self.sup_loss = loss
         self.unsup_loss = torch.nn.MSELoss()
-        if name != "None":
+        if name:
             self.name = name
         else:
             self.name = namegenerator.gen()
@@ -46,12 +46,16 @@ class Trainer:
 
         # set device
         self.device, gpu_ids = self._get_available_devices(n_gpu)
+        # TODO: migrate to DistributedDataParallel
+        # TODO: this breaks if I pass in a pretrained dataparallel model.
         self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
+        print(self.device)
         self.model.to(self.device)
 
         self.curr_epoch = 0
 
-        self.uniform = Uniform(-0.75, 0.75)
+        self.uniform = Uniform(-0.25, 0.25)
+        self.weight_schedule = lambda e : min(1/30 * e, 0.5)
 
     def train(self, epochs: int):
         print(f"training for {epochs} epochs: ")
@@ -85,6 +89,7 @@ class Trainer:
             # Compute prediction error
             sup_preds = self.model(image_l)
             loss = self.sup_loss(sup_preds, mask.squeeze(1).long())
+            sup_loss = loss.item()
 
             if self.mode == "semi":
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
@@ -102,7 +107,8 @@ class Trainer:
 
                 unsup_preds = self.model(image_ul)
                 unsup_loss = self.unsup_loss(unsup_preds, target_ul)
-                loss += unsup_loss
+                # downweight unsupervised loss
+                loss += self.weight_schedule(self.curr_epoch) * unsup_loss
 
             # Backpropagation
             self.optimizer.zero_grad()
@@ -129,7 +135,9 @@ class Trainer:
             #     self.writer.add_images("predicted_masks", pred, itr)
 
             tbar.set_description(
-                "train epoch {} | loss: {:.2f} |".format(self.curr_epoch, loss.item())
+                "train epoch {} | s: {:.2f} us: {:.2f} |".format(
+                    self.curr_epoch, sup_loss, unsup_loss.item()
+                )
             )
 
     def _valid_epoch(self):
@@ -207,8 +215,10 @@ class Trainer:
 
         free_gpus = []
         for id in range(sys_gpu):
+            #! this is giving me wierd info...
             h = pynvml.nvmlDeviceGetHandleByIndex(id)
             info = pynvml.nvmlDeviceGetMemoryInfo(h)
+            # print(id, info)
             # if the memory is more than 97.5% unused, we'll assume the GPU is free.
             if (info.free / info.total) > 0.975:
                 free_gpus.append(id)
@@ -220,4 +230,5 @@ class Trainer:
         if len(free_gpus) == 0:
             raise SystemError("No Available GPUs")
         gpu_ids = free_gpus[:n_gpu]
-        return device, gpu_ids
+        # return device, gpu_ids
+        return torch.device("cuda:1"), [1, 2]

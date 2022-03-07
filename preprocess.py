@@ -131,12 +131,12 @@ def Preprocess(
 
         try:
             # create image folder if it does not exist
-            os.makedirs(new_image_path)  
+            os.makedirs(new_image_path)
         except FileExistsError:
             True
         try:
             # create mask folder if it does not exist
-            os.makedirs(new_mask_path)  
+            os.makedirs(new_mask_path)
         except FileExistsError:
             True
 

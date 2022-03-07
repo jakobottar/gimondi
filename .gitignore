@@ -4,3 +4,4 @@ temp/*
 out/*
 runs/*
 data/*
+*.pth
