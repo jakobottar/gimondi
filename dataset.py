@@ -1,6 +1,5 @@
 from logging.handlers import RotatingFileHandler
 import random
-from utils import Cutout
 from torch.utils.data import Dataset
 import pandas as pd
 import torchvision.transforms as transforms
@@ -8,25 +7,16 @@ from skimage import io
 
 
 class SegmentationImageDataset(Dataset):
-    def __init__(self, dataset_file, cutout=False, rotate=False, flip=False):
+    def __init__(self, dataset_file, rotate=False, flip=False):
         self.dataset = pd.read_csv(dataset_file)
-        # self.cutout = cutout
         self.rotate = rotate
         self.flip = flip
 
     def transform(self, image, mask):
-        # n_holes = 2
-        # length = 128
 
         to_tensor = transforms.ToTensor()
         image = to_tensor(image)
         mask = to_tensor(mask)
-
-        # if self.cutout:
-        #     # get random cutout mask (to maintain consistency between image and mask)
-        #     cutout_mask = Cutout.get_params(image, n_holes, length)
-        #     image = image * cutout_mask
-        #     mask = mask * cutout_mask
 
         if self.rotate:
             ang = random.randint(0, 4) * 90
@@ -61,16 +51,8 @@ class SegmentationImageDataset(Dataset):
 
 class UnsupervisedSegmentationDataset(SegmentationImageDataset):
     def transform(self, image):
-        # n_holes = 2
-        # length = 128
-
         to_tensor = transforms.ToTensor()
         image = to_tensor(image)
-
-        # if self.cutout:
-        #     # get random cutout mask (to maintain consistency between image and mask)
-        #     cutout = Cutout(n_holes, length)
-        #     image = cutout(image)
 
         if self.rotate:
             ang = random.randint(0, 4) * 90

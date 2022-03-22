@@ -26,13 +26,13 @@ if __name__ == "__main__":
         help="max number of GPUs to use (default: 2)",
     )
     parser.add_argument(
-        "--mode", type=str, default="semi", help="model mode (default: semi)"
+        "-m", "--mode", type=str, default="semi", help="model mode (default: semi)"
     )
     parser.add_argument(
-        "--name", type=str, default=None, help="model name (default: random name)"
+        "-n", "--name", type=str, default=None, help="model name (default: random name)"
     )
     parser.add_argument(
-        "--pretrained", type=str, default=None, help="add a pretrained model here"
+        "-p", "--pretrained", type=str, default=None, help="add a pretrained model here"
     )
     FLAGS = parser.parse_args()
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     )
 
     batch_size = 10
-    test_dataloader = DataLoader(test_dataset, batch_size=4)
+    test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
     sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
     unsup_dataloader = DataLoader(unsup_dataset, batch_size=batch_size, shuffle=True)
     dataloader = utils.SemiSupervisedDataLoader(
@@ -58,7 +58,10 @@ if __name__ == "__main__":
 
     net = UNet()
     if FLAGS.pretrained:
-        net.load_state_dict(torch.load(FLAGS.pretrained))
+        # load pretrained model, map_location puts it on CPU on load.
+        net.load_state_dict(
+            torch.load(FLAGS.pretrained, map_location=torch.device("cpu"))
+        )
 
     optimizer = torch.optim.AdamW(net.parameters(), lr=0.01, weight_decay=0.1)
     loss = nn.CrossEntropyLoss()

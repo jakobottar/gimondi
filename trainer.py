@@ -1,6 +1,3 @@
-from sys import prefix
-from torch import tensor
-from matplotlib import image
 import torch
 import os
 from tqdm import tqdm
@@ -10,9 +7,6 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 import numpy as np
 import pynvml
-from torchvision.transforms import ColorJitter
-
-from torch.distributions.uniform import Uniform
 
 import namegenerator
 
@@ -35,10 +29,12 @@ class Trainer:
         self.optimizer = optimizer
         self.sup_loss = loss
         self.unsup_loss = torch.nn.MSELoss()
+
         if name:
             self.name = name
         else:
             self.name = namegenerator.gen()
+
         self.writer = SummaryWriter("runs/" + self.name)
         print(f"run name: {self.name}")
         os.makedirs(f"./out/{self.name}/", exist_ok=True)
@@ -46,19 +42,13 @@ class Trainer:
         self.mode = mode
         print(f"training mode: {self.mode}")
 
-        # set device
-        self.device, gpu_ids = self._get_available_devices(n_gpu)
-        # TODO: migrate to DistributedDataParallel
-        # TODO: this breaks if I pass in a pretrained dataparallel model.
-        # Change to saving model.module.state_dict() then create model and load weights.
-        self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
-        print(self.device)
-        self.model.to(self.device)
-
         self.curr_epoch = 0
 
-        self.uniform = Uniform(-0.25, 0.25)
-        self.weight_schedule = lambda e: min(1e-3 * e, 0.05)
+        # set device
+        # TODO: migrate to DistributedDataParallel
+        self.device, gpu_ids = self._get_available_devices(n_gpu)
+        self.model.to(self.device)
+        self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
 
     def train(self, epochs: int):
         print(f"training for {epochs} epochs: ")
@@ -73,7 +63,7 @@ class Trainer:
             self._example_image(images, masks, prefix="valid")
 
             torch.save(
-                self.model.module.state_dict(), f"./out/{self.name}/checkpoint_{e}.pth"
+                self.model.module.state_dict(), f"./out/{self.name}/chkpt_{e}.pth"
             )
         torch.save(self.model.module.state_dict(), f"./out/{self.name}/model.pth")
         self.writer.close()
@@ -87,7 +77,7 @@ class Trainer:
         tbar = tqdm(range(len(self.train_dataloader)), ncols=term_size.columns)
 
         for batch_idx in tbar:
-            (image_l, mask), image_ul = next(dataloader)
+            (image_l, mask), _ = next(dataloader)
             image_l = image_l.cuda(device=self.device, non_blocking=True)
             mask = mask.cuda(device=self.device, non_blocking=True)
 
@@ -96,34 +86,6 @@ class Trainer:
             loss = self.sup_loss(sup_preds, mask.squeeze(1).long())
             sup_loss = loss.item()
 
-            if self.mode == "semi":
-                image_ul = image_ul.cuda(device=self.device, non_blocking=True)
-                target_ul = self.model(image_ul)
-                target_ul = F.softmax(target_ul.detach(), dim=1)
-
-                ### Additive Noise
-                noisy = image_ul.clone().detach()
-                for i in range(len(noisy)):
-                    noise = (
-                        self.uniform.sample(noisy[i].shape[1:])
-                        .to(noisy.device)
-                        .unsqueeze(0)
-                    ) * torch.max(noisy[i].detach())
-                    noisy[i] += noise
-
-                unsup_preds = self.model(noisy)
-                addnoise_loss = self.unsup_loss(unsup_preds, target_ul)
-
-                # ### Brightness Jitter
-                jitter = ColorJitter(saturation=0, hue=0)
-                color = jitter(image_ul.clone().detach())
-
-                unsup_preds = self.model(color)
-                coljitter_loss = self.unsup_loss(unsup_preds, target_ul)
-
-                unsup_loss = coljitter_loss + addnoise_loss
-                loss += self.weight_schedule(self.curr_epoch) * unsup_loss
-
             # Backpropagation
             self.optimizer.zero_grad()
             loss.backward()
@@ -131,20 +93,9 @@ class Trainer:
 
             if batch_idx % 10 == 0:
                 itr = (self.curr_epoch * len(dataloader)) + batch_idx
-                if self.mode == "semi":
-                    self.writer.add_scalar(
-                        "additive_noise_loss", addnoise_loss.item(), itr
-                    )
-                    self.writer.add_scalar(
-                        "color_jitter_loss", coljitter_loss.item(), itr
-                    )
-                    self.writer.add_scalar(
-                        "unsup_weight", self.weight_schedule(self.curr_epoch), itr
-                    )
 
                 self.writer.add_scalar("supervised_loss", sup_loss, itr)
 
-            # TODO: fix!
             if batch_idx % 20 == 0:
                 self.writer.add_images("train_images", image_l.cpu(), itr)
                 self.writer.add_images("train_masks", mask.cpu(), itr)
@@ -159,41 +110,9 @@ class Trainer:
                     pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
                 self.writer.add_images("predicted_masks", pred, itr)
 
-                # if self.mode == "semi":
-                # self.writer.add_images("unsupervised_images", image_ul.cpu(), itr)
-
-                # pred_arr = target_ul.cpu().numpy()
-                # length = pred_arr[0].shape[1]
-                # width = pred_arr[0].shape[2]
-                # pred = np.zeros(shape=(len(pred_arr), 3, length, width))
-                # for i in range(len(pred)):
-                #     pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                #     pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                #     pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                # self.writer.add_images("unsupervised_target_masks", pred, itr)
-
-                # pred_arr = F.softmax(unsup_preds, dim=1).cpu().detach().numpy()
-                # length = pred_arr[0].shape[1]
-                # width = pred_arr[0].shape[2]
-                # pred = np.zeros(shape=(len(pred_arr), 3, length, width))
-                # for i in range(len(pred)):
-                #     pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                #     pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                #     pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                # self.writer.add_images("unsupervised_predicted_masks", pred, itr)
-
-            if self.mode == "semi":
-                tbar.set_description(
-                    "train epoch {} | s: {:.2f} us: {:.2f} |".format(
-                        self.curr_epoch, sup_loss, unsup_loss.item()
-                    )
-                )
-            else:
-                tbar.set_description(
-                    "train epoch {} | s: {:.2f} us: NA |".format(
-                        self.curr_epoch, sup_loss
-                    )
-                )
+            tbar.set_description(
+                "train epoch {} | s: {:.2f} us: NA |".format(self.curr_epoch, sup_loss)
+            )
 
     def _valid_epoch(self):
         self.model.eval()
@@ -204,19 +123,18 @@ class Trainer:
 
         ave_loss = 0
         with torch.no_grad():
-            for batch_idx in tbar:
+            for _ in tbar:
                 image, mask = next(dataloader)
-                image, mask = image.cuda(
-                    device=self.device, non_blocking=True
-                ), mask.cuda(device=self.device, non_blocking=True)
+                image = image.cuda(device=self.device, non_blocking=True)
+                mask = mask.cuda(device=self.device, non_blocking=True)
 
                 preds = self.model(image)
                 loss = self.sup_loss(preds, mask.squeeze(1).long())
-                ave_loss += loss.mean().item()
+                ave_loss += loss.item()
 
                 tbar.set_description(
                     "valid epoch {} | loss: {:.2f} |".format(
-                        self.curr_epoch, loss.mean().item()
+                        self.curr_epoch, loss.item()
                     )
                 )
         ave_loss /= len(self.valid_dataloader)
@@ -270,7 +188,6 @@ class Trainer:
 
         free_gpus = []
         for id in range(sys_gpu):
-            #! this is giving me wierd info...
             h = pynvml.nvmlDeviceGetHandleByIndex(id)
             info = pynvml.nvmlDeviceGetMemoryInfo(h)
             # print(id, info)
@@ -279,12 +196,10 @@ class Trainer:
                 free_gpus.append(id)
 
         device = torch.device(f"cuda:{free_gpus[0]}")
-        print(device)
         print(
             f"Unccoupied GPUs: {len(free_gpus)} Requested: {n_gpu} Running on (ids): {free_gpus[:n_gpu]}"
         )
         if len(free_gpus) == 0:
             raise SystemError("No Available GPUs")
         gpu_ids = free_gpus[:n_gpu]
-        # return device, gpu_ids
-        return torch.device("cuda:1"), [1, 2]
+        return device, gpu_ids
