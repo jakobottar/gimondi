@@ -48,7 +48,7 @@ if __name__ == "__main__":
         f"datasets loaded:\n    {len(sup_dataset)} labeled examples\n    {len(unsup_dataset)} unlabeled examples\n    {len(test_dataset)} testing examples"
     )
 
-    batch_size = 16
+    batch_size = 10
     test_dataloader = DataLoader(test_dataset, batch_size=4)
     sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
     unsup_dataloader = DataLoader(unsup_dataset, batch_size=batch_size, shuffle=True)
@@ -56,10 +56,10 @@ if __name__ == "__main__":
         sup_dataloader, unsup_dataloader, FLAGS.mode
     )
 
+    net = UNet()
     if FLAGS.pretrained:
-        net = torch.load(FLAGS.pretrained)
-    else:
-        net = UNet()
+        net.load_state_dict(torch.load(FLAGS.pretrained))
+
     optimizer = torch.optim.AdamW(net.parameters(), lr=0.01, weight_decay=0.1)
     loss = nn.CrossEntropyLoss()
 

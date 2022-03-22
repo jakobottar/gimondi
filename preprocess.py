@@ -172,20 +172,26 @@ def Preprocess(
 
 
 if __name__ == "__main__":
-    dataset_file = "/home/sci/jakobj/datasets/alpha-uo3/alpha-uo3.csv"
+    # dataset_file = (
+    #     "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/alpha-uo3/data.csv"
+    # )
+    dataset_file = (
+        "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/u3o8/data.csv"
+    )
     dataset = pd.read_csv(dataset_file)
 
-    sup_ix = 45
-    unsup_ix = 50
+    sup_ix = 25
+    unsup_ix = 46
 
     dataset.sample(frac=1).reset_index(drop=True)
 
     supervised = dataset.iloc[0:sup_ix]
     unsupervised = dataset.iloc[sup_ix:unsup_ix]
-    validation = dataset.iloc[50:]
+    validation = dataset.iloc[46:]
 
-    unsegmented_file = "/home/sci/jakobj/datasets/uo3-unsegmented/files.csv"
-    unseg_dataset = pd.read_csv(unsegmented_file)
+    # unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/uo3-unsegmented/data.csv"
+    unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/u3o8-unsegmented/data.csv"
+    unseg_dataset = pd.read_csv(unsegmented_file).iloc[0:24]
 
     unsupervised = pd.concat([unsupervised, unseg_dataset], ignore_index=True)
 
@@ -199,21 +205,21 @@ if __name__ == "__main__":
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            validation, csvwriter, 30, 512, 512, "/scratch/jakobj/nfs/", "valid_uo3"
+            validation, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "valid_u3o8"
         )
 
     with open("./data/train_supervised.csv", "w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            supervised, csvwriter, 30, 512, 512, "/scratch/jakobj/nfs/", "sup_uo3"
+            supervised, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "sup_u3o8"
         )
 
     with open("./data/train_unsupervised.csv", "w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            unsupervised, csvwriter, 30, 512, 512, "/scratch/jakobj/nfs/", "unsup_uo3"
+            unsupervised, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "unsup_u3o8"
         )
 
     print("finished preprocessing raw images.")

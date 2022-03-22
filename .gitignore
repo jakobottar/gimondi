@@ -5,3 +5,4 @@ out/*
 runs/*
 data/*
 *.pth
+.vscode

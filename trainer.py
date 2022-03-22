@@ -1,4 +1,5 @@
 from sys import prefix
+from torch import tensor
 from matplotlib import image
 import torch
 import os
@@ -9,6 +10,7 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 import numpy as np
 import pynvml
+from torchvision.transforms import ColorJitter
 
 from torch.distributions.uniform import Uniform
 
@@ -48,6 +50,7 @@ class Trainer:
         self.device, gpu_ids = self._get_available_devices(n_gpu)
         # TODO: migrate to DistributedDataParallel
         # TODO: this breaks if I pass in a pretrained dataparallel model.
+        # Change to saving model.module.state_dict() then create model and load weights.
         self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
         print(self.device)
         self.model.to(self.device)
@@ -55,7 +58,7 @@ class Trainer:
         self.curr_epoch = 0
 
         self.uniform = Uniform(-0.25, 0.25)
-        self.weight_schedule = lambda e : min(1/30 * e, 0.5)
+        self.weight_schedule = lambda e: min(1e-3 * e, 0.05)
 
     def train(self, epochs: int):
         print(f"training for {epochs} epochs: ")
@@ -69,8 +72,10 @@ class Trainer:
             images, masks = next(iter(self.valid_dataloader))
             self._example_image(images, masks, prefix="valid")
 
-            torch.save(self.model, f"./out/{self.name}/checkpoint_{e}.pth")
-        torch.save(self.model, f"./out/{self.name}/model.pth")
+            torch.save(
+                self.model.module.state_dict(), f"./out/{self.name}/checkpoint_{e}.pth"
+            )
+        torch.save(self.model.module.state_dict(), f"./out/{self.name}/model.pth")
         self.writer.close()
 
     def _train_epoch(self):
@@ -96,18 +101,27 @@ class Trainer:
                 target_ul = self.model(image_ul)
                 target_ul = F.softmax(target_ul.detach(), dim=1)
 
-                # TODO: improve this
-                for i in range(len(image_ul)):
+                ### Additive Noise
+                noisy = image_ul.clone().detach()
+                for i in range(len(noisy)):
                     noise = (
-                        self.uniform.sample(image_ul[i].shape[1:])
-                        .to(image_ul.device)
+                        self.uniform.sample(noisy[i].shape[1:])
+                        .to(noisy.device)
                         .unsqueeze(0)
-                    )
-                    image_ul[i] += image_ul[i].mul(noise)
+                    ) * torch.max(noisy[i].detach())
+                    noisy[i] += noise
 
-                unsup_preds = self.model(image_ul)
-                unsup_loss = self.unsup_loss(unsup_preds, target_ul)
-                # downweight unsupervised loss
+                unsup_preds = self.model(noisy)
+                addnoise_loss = self.unsup_loss(unsup_preds, target_ul)
+
+                # ### Brightness Jitter
+                jitter = ColorJitter(saturation=0, hue=0)
+                color = jitter(image_ul.clone().detach())
+
+                unsup_preds = self.model(color)
+                coljitter_loss = self.unsup_loss(unsup_preds, target_ul)
+
+                unsup_loss = coljitter_loss + addnoise_loss
                 loss += self.weight_schedule(self.curr_epoch) * unsup_loss
 
             # Backpropagation
@@ -117,28 +131,69 @@ class Trainer:
 
             if batch_idx % 10 == 0:
                 itr = (self.curr_epoch * len(dataloader)) + batch_idx
-                self.writer.add_scalar("total_loss", loss.item(), itr)
+                if self.mode == "semi":
+                    self.writer.add_scalar(
+                        "additive_noise_loss", addnoise_loss.item(), itr
+                    )
+                    self.writer.add_scalar(
+                        "color_jitter_loss", coljitter_loss.item(), itr
+                    )
+                    self.writer.add_scalar(
+                        "unsup_weight", self.weight_schedule(self.curr_epoch), itr
+                    )
+
+                self.writer.add_scalar("supervised_loss", sup_loss, itr)
 
             # TODO: fix!
-            # if batch_idx % 100 == 0:
-            #     self.writer.add_images("train_images", image_l.cpu(), itr)
-            #     self.writer.add_images("train_masks", mask.cpu(), itr)
+            if batch_idx % 20 == 0:
+                self.writer.add_images("train_images", image_l.cpu(), itr)
+                self.writer.add_images("train_masks", mask.cpu(), itr)
 
-            #     pred_arr = F.softmax(sup_preds[0], dim=1).cpu().detach().numpy()
-            #     pred = np.zeros(
-            #         (len(pred_arr), 3, pred_arr[0].shape[1], pred_arr[0].shape[2])
-            #     )
-            #     for i in range(len(pred)):
-            #         pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-            #         pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-            #         pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-            #     self.writer.add_images("predicted_masks", pred, itr)
+                pred_arr = F.softmax(sup_preds, dim=1).cpu().detach().numpy()
+                length = pred_arr[0].shape[1]
+                width = pred_arr[0].shape[2]
+                pred = np.zeros(shape=(len(pred_arr), 3, length, width))
+                for i in range(len(pred)):
+                    pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                    pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                    pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                self.writer.add_images("predicted_masks", pred, itr)
 
-            tbar.set_description(
-                "train epoch {} | s: {:.2f} us: {:.2f} |".format(
-                    self.curr_epoch, sup_loss, unsup_loss.item()
+                # if self.mode == "semi":
+                # self.writer.add_images("unsupervised_images", image_ul.cpu(), itr)
+
+                # pred_arr = target_ul.cpu().numpy()
+                # length = pred_arr[0].shape[1]
+                # width = pred_arr[0].shape[2]
+                # pred = np.zeros(shape=(len(pred_arr), 3, length, width))
+                # for i in range(len(pred)):
+                #     pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                #     pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                #     pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                # self.writer.add_images("unsupervised_target_masks", pred, itr)
+
+                # pred_arr = F.softmax(unsup_preds, dim=1).cpu().detach().numpy()
+                # length = pred_arr[0].shape[1]
+                # width = pred_arr[0].shape[2]
+                # pred = np.zeros(shape=(len(pred_arr), 3, length, width))
+                # for i in range(len(pred)):
+                #     pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                #     pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                #     pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+                # self.writer.add_images("unsupervised_predicted_masks", pred, itr)
+
+            if self.mode == "semi":
+                tbar.set_description(
+                    "train epoch {} | s: {:.2f} us: {:.2f} |".format(
+                        self.curr_epoch, sup_loss, unsup_loss.item()
+                    )
                 )
-            )
+            else:
+                tbar.set_description(
+                    "train epoch {} | s: {:.2f} us: NA |".format(
+                        self.curr_epoch, sup_loss
+                    )
+                )
 
     def _valid_epoch(self):
         self.model.eval()
@@ -224,6 +279,7 @@ class Trainer:
                 free_gpus.append(id)
 
         device = torch.device(f"cuda:{free_gpus[0]}")
+        print(device)
         print(
             f"Unccoupied GPUs: {len(free_gpus)} Requested: {n_gpu} Running on (ids): {free_gpus[:n_gpu]}"
         )
