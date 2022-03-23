@@ -180,20 +180,20 @@ if __name__ == "__main__":
     )
     dataset = pd.read_csv(dataset_file)
 
-    sup_ix = 25
+    sup_ix = 46
     unsup_ix = 46
 
     dataset.sample(frac=1).reset_index(drop=True)
 
     supervised = dataset.iloc[0:sup_ix]
     unsupervised = dataset.iloc[sup_ix:unsup_ix]
-    validation = dataset.iloc[46:]
+    validation = dataset.iloc[unsup_ix:]
 
     # unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/uo3-unsegmented/data.csv"
-    unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/u3o8-unsegmented/data.csv"
-    unseg_dataset = pd.read_csv(unsegmented_file).iloc[0:24]
+    # unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/u3o8-unsegmented/data.csv"
+    # unseg_dataset = pd.read_csv(unsegmented_file).iloc[0:24]
 
-    unsupervised = pd.concat([unsupervised, unseg_dataset], ignore_index=True)
+    # unsupervised = pd.concat([unsupervised, unseg_dataset], ignore_index=True)
 
     try:
         os.makedirs("./data/")

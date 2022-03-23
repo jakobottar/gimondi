@@ -7,7 +7,8 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 import numpy as np
 import pynvml
-
+from torchvision.transforms import ColorJitter
+import utils
 import namegenerator
 
 
@@ -27,8 +28,8 @@ class Trainer:
         self.train_dataloader = train_dataloader
         self.valid_dataloader = validation_dataloader
         self.optimizer = optimizer
-        self.sup_loss = loss
-        self.unsup_loss = torch.nn.MSELoss()
+        self.sup_loss_fn = loss
+        self.unsup_loss_fn = torch.nn.MSELoss()
 
         if name:
             self.name = name
@@ -43,6 +44,7 @@ class Trainer:
         print(f"training mode: {self.mode}")
 
         self.curr_epoch = 0
+        self.unsup_weight = lambda e: min(1e-3 * e, 0.1)
 
         # set device
         # TODO: migrate to DistributedDataParallel
@@ -77,14 +79,55 @@ class Trainer:
         tbar = tqdm(range(len(self.train_dataloader)), ncols=term_size.columns)
 
         for batch_idx in tbar:
-            (image_l, mask), _ = next(dataloader)
+            (image_l, mask), image_ul = next(dataloader)
             image_l = image_l.cuda(device=self.device, non_blocking=True)
             mask = mask.cuda(device=self.device, non_blocking=True)
 
             # Compute prediction error
             sup_preds = self.model(image_l)
-            loss = self.sup_loss(sup_preds, mask.squeeze(1).long())
-            sup_loss = loss.item()
+            loss = self.sup_loss_fn(sup_preds, mask.squeeze(1).long())
+            s_loss = loss.item()
+
+            # unsupervised section
+            if self.mode == "semi":
+                image_ul = image_ul.cuda(device=self.device, non_blocking=True)
+
+                target = image_ul.clone().detach()
+                target = self.model(target)
+                target = F.softmax(target, dim=1)
+
+                # fig = plt.figure(figsize=(6, 6))
+                # ax1 = plt.subplot(2, 2, 1)
+                # ax2 = plt.subplot(2, 2, 2)
+
+                # ax3 = plt.subplot(2, 2, 3)
+                # ax4 = plt.subplot(2, 2, 4, sharex=ax2, sharey=ax2)
+
+                # ax1.imshow(image_ul[0].cpu().numpy().transpose(1, 2, 0))
+                # ax1.set_axis_off()
+                # ax1.set_title("Original Image")
+
+                # ax2.imshow(target[0][0].cpu().detach().numpy())
+                # ax2.set_axis_off()
+                # ax2.set_title("Target Mask")
+
+                jitter = ColorJitter(brightness=0.25, contrast=0.25)
+                image_ul = jitter(image_ul)
+
+                # ax3.imshow(image_ul[0].cpu().numpy().transpose(1, 2, 0))
+                # ax3.set_axis_off()
+                # ax3.set_title("Jittered Image")
+
+                pred_ul = self.model(image_ul)
+                us_loss = self.unsup_loss_fn(target, pred_ul)
+
+                # pred_ul = F.softmax(pred_ul, dim=1)
+                # ax4.imshow(pred_ul[0][0].cpu().detach().numpy())
+                # ax4.set_axis_off()
+                # ax4.set_title("Unsupervised Prediction")
+                # plt.savefig("./out/test.png")
+
+                loss += self.unsup_weight(self.curr_epoch) * us_loss
 
             # Backpropagation
             self.optimizer.zero_grad()
@@ -94,25 +137,40 @@ class Trainer:
             if batch_idx % 10 == 0:
                 itr = (self.curr_epoch * len(dataloader)) + batch_idx
 
-                self.writer.add_scalar("supervised_loss", sup_loss, itr)
+                self.writer.add_scalar("supervised_loss", s_loss, itr)
 
-            if batch_idx % 20 == 0:
-                self.writer.add_images("train_images", image_l.cpu(), itr)
-                self.writer.add_images("train_masks", mask.cpu(), itr)
+                if self.mode == "semi":
+                    self.writer.add_scalar("unsupervised_loss", us_loss, itr)
+                    self.writer.add_scalar(
+                        "unsupervised_weight", self.unsup_weight(self.curr_epoch), itr
+                    )
 
-                pred_arr = F.softmax(sup_preds, dim=1).cpu().detach().numpy()
-                length = pred_arr[0].shape[1]
-                width = pred_arr[0].shape[2]
-                pred = np.zeros(shape=(len(pred_arr), 3, length, width))
-                for i in range(len(pred)):
-                    pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                    pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                    pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
-                self.writer.add_images("predicted_masks", pred, itr)
+            # if batch_idx % 20 == 0:
+            #     self.writer.add_images("train_images", image_l.cpu(), itr)
+            #     self.writer.add_images("train_masks", mask.cpu(), itr)
 
-            tbar.set_description(
-                "train epoch {} | s: {:.2f} us: NA |".format(self.curr_epoch, sup_loss)
-            )
+            #     pred_arr = F.softmax(sup_preds, dim=1).cpu().detach().numpy()
+            #     length = pred_arr[0].shape[1]
+            #     width = pred_arr[0].shape[2]
+            #     pred = np.zeros(shape=(len(pred_arr), 3, length, width))
+            #     for i in range(len(pred)):
+            #         pred[i, 0] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+            #         pred[i, 1] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+            #         pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
+            #     self.writer.add_images("predicted_masks", pred, itr)
+
+            if self.mode == "semi":
+                tbar.set_description(
+                    "train epoch {} | s: {:.2f} us: {:.2f} |".format(
+                        self.curr_epoch, s_loss, us_loss
+                    )
+                )
+            else:
+                tbar.set_description(
+                    "train epoch {} | s: {:.2f} us: NA |".format(
+                        self.curr_epoch, s_loss
+                    )
+                )
 
     def _valid_epoch(self):
         self.model.eval()
@@ -121,7 +179,7 @@ class Trainer:
         term_size = shutil.get_terminal_size()
         tbar = tqdm(range(len(self.valid_dataloader)), ncols=term_size.columns)
 
-        ave_loss = 0
+        ave_TPR, ave_FPR = 0, 0
         with torch.no_grad():
             for _ in tbar:
                 image, mask = next(dataloader)
@@ -129,18 +187,30 @@ class Trainer:
                 mask = mask.cuda(device=self.device, non_blocking=True)
 
                 preds = self.model(image)
-                loss = self.sup_loss(preds, mask.squeeze(1).long())
-                ave_loss += loss.item()
+                # loss = self.sup_loss_fn(preds, mask.squeeze(1).long())
+                TPR, FPR = 0, 0
+                for i in range(preds.shape[0]):
+                    predi = preds.cpu().numpy()[i][1] > preds.cpu().numpy()[i][0]
+                    TPRi, FPRi, _, _, _ = utils.qScore(
+                        predi, mask.squeeze(1).cpu().numpy()[i], cat="particle"
+                    )
+                    TPR += TPRi
+                    FPR += FPRi
+
+                ave_TPR += TPR / preds.shape[0]
+                ave_FPR += FPR / preds.shape[0]
 
                 tbar.set_description(
-                    "valid epoch {} | loss: {:.2f} |".format(
-                        self.curr_epoch, loss.item()
+                    "valid epoch {} |  tpr: {:.2f} fpr: {:.2f} |".format(
+                        self.curr_epoch, TPR / preds.shape[0], FPR / preds.shape[0]
                     )
                 )
-        ave_loss /= len(self.valid_dataloader)
+        ave_TPR /= len(self.valid_dataloader)
+        ave_FPR /= len(self.valid_dataloader)
 
-        print("validation error: {:.2f}".format(ave_loss))
-        self.writer.add_scalar("valid_loss", ave_loss, self.curr_epoch)
+        print("validation tpr: {:.2f}, fpr: {:.2f}".format(ave_TPR, ave_FPR))
+        self.writer.add_scalar("valid_tpr", ave_TPR, self.curr_epoch)
+        self.writer.add_scalar("valid_fpr", ave_FPR, self.curr_epoch)
 
     def _example_image(self, images, masks, prefix="img"):
         self.model.eval()
@@ -151,7 +221,7 @@ class Trainer:
                 mask = masks[b].cpu().numpy().squeeze()
                 image = images[b].cpu().numpy().transpose(1, 2, 0)
                 pred_arr = F.softmax(preds[b], dim=0).cpu().numpy()
-                pred = pred_arr[1] > pred_arr[0]
+                pred = utils.PostProcessing(pred_arr[1] > pred_arr[0])
 
                 fig = plt.figure(figsize=(9, 4))
                 ax1 = plt.subplot(1, 3, 1)

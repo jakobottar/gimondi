@@ -48,10 +48,15 @@ if __name__ == "__main__":
         f"datasets loaded:\n    {len(sup_dataset)} labeled examples\n    {len(unsup_dataset)} unlabeled examples\n    {len(test_dataset)} testing examples"
     )
 
-    batch_size = 10
+    batch_size = 6
     test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
     sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
-    unsup_dataloader = DataLoader(unsup_dataset, batch_size=batch_size, shuffle=True)
+    if FLAGS.mode == "semi":
+        unsup_dataloader = DataLoader(
+            unsup_dataset, batch_size=batch_size, shuffle=True
+        )
+    else:
+        unsup_dataloader = None
     dataloader = utils.SemiSupervisedDataLoader(
         sup_dataloader, unsup_dataloader, FLAGS.mode
     )
