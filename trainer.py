@@ -40,11 +40,8 @@ class Trainer:
         print(f"run name: {self.name}")
         os.makedirs(f"./out/{self.name}/", exist_ok=True)
 
-        self.mode = mode
-        print(f"training mode: {self.mode}")
-
         self.curr_epoch = 0
-        self.unsup_weight = lambda e: min(1e-3 * e, 0.1)
+        self.unsup_weight = lambda e: min(e * 1e-3, 0.03)
 
         # set device
         # TODO: migrate to DistributedDataParallel
@@ -53,10 +50,20 @@ class Trainer:
         self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
 
     def train(self, epochs: int):
+        def schedule(e):
+            if e < 5:
+                return "super"
+            if e % 2 == 1:
+                return "semi"
+            if e % 2 == 1:
+                return "semi"
+            return "super"
+
         print(f"training for {epochs} epochs: ")
         for e in range(epochs):
             self.curr_epoch = e
-            self._train_epoch()
+            self._train_epoch(mode=schedule(e))
+            # self._train_epoch(mode = "super")
             (images, masks), _ = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
@@ -70,7 +77,8 @@ class Trainer:
         torch.save(self.model.module.state_dict(), f"./out/{self.name}/model.pth")
         self.writer.close()
 
-    def _train_epoch(self):
+    def _train_epoch(self, mode):
+        print(f"training mode: {mode}")
         self.model.train()
         # we need to do this each time to "reset" the iter obj.
         dataloader = iter(self.train_dataloader)
@@ -89,7 +97,7 @@ class Trainer:
             s_loss = loss.item()
 
             # unsupervised section
-            if self.mode == "semi":
+            if mode == "semi":
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
                 target = image_ul.clone().detach()
@@ -139,7 +147,7 @@ class Trainer:
 
                 self.writer.add_scalar("supervised_loss", s_loss, itr)
 
-                if self.mode == "semi":
+                if mode == "semi":
                     self.writer.add_scalar("unsupervised_loss", us_loss, itr)
                     self.writer.add_scalar(
                         "unsupervised_weight", self.unsup_weight(self.curr_epoch), itr
@@ -159,7 +167,7 @@ class Trainer:
             #         pred[i, 2] = (pred_arr[i, 1] > pred_arr[i, 0]).astype(int)
             #     self.writer.add_images("predicted_masks", pred, itr)
 
-            if self.mode == "semi":
+            if mode == "semi":
                 tbar.set_description(
                     "train epoch {} | s: {:.2f} us: {:.2f} |".format(
                         self.curr_epoch, s_loss, us_loss
@@ -179,7 +187,7 @@ class Trainer:
         term_size = shutil.get_terminal_size()
         tbar = tqdm(range(len(self.valid_dataloader)), ncols=term_size.columns)
 
-        ave_TPR, ave_FPR = 0, 0
+        ave_TPR, ave_FPR, ave_IoU = 0, 0, 0
         with torch.no_grad():
             for _ in tbar:
                 image, mask = next(dataloader)
@@ -188,29 +196,33 @@ class Trainer:
 
                 preds = self.model(image)
                 # loss = self.sup_loss_fn(preds, mask.squeeze(1).long())
-                TPR, FPR = 0, 0
+                TPR, FPR, IoU = 0, 0, 0
                 for i in range(preds.shape[0]):
                     predi = preds.cpu().numpy()[i][1] > preds.cpu().numpy()[i][0]
-                    TPRi, FPRi, _, _, _ = utils.qScore(
-                        predi, mask.squeeze(1).cpu().numpy()[i], cat="particle"
+                    TPRi, FPRi, IoUi, _, _ = utils.qScore(
+                        predi, mask.squeeze(1).cpu().numpy()[i], cat="pixel"
                     )
                     TPR += TPRi
                     FPR += FPRi
+                    IoU += IoUi
 
                 ave_TPR += TPR / preds.shape[0]
                 ave_FPR += FPR / preds.shape[0]
+                ave_IoU += IoU / preds.shape[0]
 
                 tbar.set_description(
-                    "valid epoch {} |  tpr: {:.2f} fpr: {:.2f} |".format(
-                        self.curr_epoch, TPR / preds.shape[0], FPR / preds.shape[0]
+                    "valid epoch {} |  iou: {:.2f} |".format(
+                        self.curr_epoch, IoU / preds.shape[0]
                     )
                 )
         ave_TPR /= len(self.valid_dataloader)
         ave_FPR /= len(self.valid_dataloader)
+        ave_IoU /= len(self.valid_dataloader)
 
-        print("validation tpr: {:.2f}, fpr: {:.2f}".format(ave_TPR, ave_FPR))
-        self.writer.add_scalar("valid_tpr", ave_TPR, self.curr_epoch)
-        self.writer.add_scalar("valid_fpr", ave_FPR, self.curr_epoch)
+        print("validation iou: {:.2f}".format(ave_IoU))
+        # self.writer.add_scalar("valid_tpr", ave_TPR, self.curr_epoch)
+        # self.writer.add_scalar("valid_fpr", ave_FPR, self.curr_epoch)
+        self.writer.add_scalar("valid_iou", ave_IoU, self.curr_epoch)
 
     def _example_image(self, images, masks, prefix="img"):
         self.model.eval()
