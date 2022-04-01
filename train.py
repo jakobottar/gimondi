@@ -48,7 +48,7 @@ if __name__ == "__main__":
         f"datasets loaded:\n    {len(sup_dataset)} labeled examples\n    {len(unsup_dataset)} unlabeled examples\n    {len(test_dataset)} testing examples"
     )
 
-    batch_size = 12
+    batch_size = 6
     test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
     sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
     if FLAGS.mode == "semi":
