@@ -56,15 +56,13 @@ class Trainer:
                 return "super"
             if e % 2 == 1:
                 return "semi"
-            if e % 2 == 1:
-                return "semi"
             return "super"
 
         print(f"training for {epochs} epochs: ")
         for e in range(epochs):
             self.curr_epoch = e
             self._train_epoch(mode=schedule(e))
-            # self._train_epoch(mode = "semi")
+            # self._train_epoch(mode="semi")
             (images, masks), _ = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
@@ -100,132 +98,39 @@ class Trainer:
             # unsupervised section
             if mode == "semi":
 
-                # def unsup_iter(image, func, target):
-                #     image = func(image)
-                #     image = self.model(image)
-                #     return self.unsup_loss_fn(target, image)
+                def unsup_iter(image, func, inverse, target):
+                    image = func(image)
+                    image = self.model(image)
+                    if inverse:
+                        image = inverse(image)
+                    return self.unsup_loss_fn(target, image)
 
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
-
-                fig = plt.figure(figsize=(6, 13))
-                ax1 = plt.subplot(5, 2, 1)
-                ax2 = plt.subplot(5, 2, 2, sharex=ax1, sharey=ax1)
-
-                ax3 = plt.subplot(5, 2, 3)
-                ax4 = plt.subplot(5, 2, 4)
-
-                ax5 = plt.subplot(5, 2, 5)
-                ax6 = plt.subplot(5, 2, 6)
-
-                ax7 = plt.subplot(5, 2, 7)
-                ax8 = plt.subplot(5, 2, 8)
-
-                ax9 = plt.subplot(5, 2, 9)
-                ax10 = plt.subplot(5, 2, 10)
-
-                ax1.imshow(image_ul[2].cpu().numpy().transpose(1, 2, 0))
-                ax1.set_axis_off()
-                ax1.set_title("Input Image")
 
                 # make target mask
                 target = image_ul.clone().detach()
                 target = self.model(target)
                 target = F.softmax(target, dim=1)
 
-                ax2.imshow(
-                    target[2].detach().cpu().numpy()[1]
-                    > target[2].detach().cpu().numpy()[0]
-                )
-                ax2.set_axis_off()
-                ax2.set_title("Target Mask")
-
-                # brightness/contrast jitter
-                bright_noisy = image_ul.clone().detach()
-                jitter = ColorJitter(brightness=0.25, contrast=0.25)
-                bright_noisy = jitter(bright_noisy)
-
-                ax3.imshow(bright_noisy[2].cpu().numpy().transpose(1, 2, 0))
-                ax3.set_axis_off()
-                ax3.set_title("Bright/Cont. Jitter")
-
-                bright_noisy = self.model(bright_noisy)
-                us_loss = self.unsup_loss_fn(target, bright_noisy)
-
-                bright_noisy = F.softmax(bright_noisy, dim=1)
-                ax4.imshow(
-                    bright_noisy[2].detach().cpu().numpy()[1]
-                    > bright_noisy[2].detach().cpu().numpy()[0]
-                )
-                ax4.set_axis_off()
-                ax4.set_title("Bright/Cont. Mask")
-
-                # additive noise
-                add_noisy = image_ul.clone().detach()
-                add_noisy += (
-                    torch.rand_like(add_noisy, device=add_noisy.device) - 0.5
-                ) * 0.25
-
-                ax5.imshow(add_noisy[2].cpu().numpy().transpose(1, 2, 0))
-                ax5.set_axis_off()
-                ax5.set_title("Additive Noise")
-
-                add_noisy = self.model(add_noisy)
-                us_loss += self.unsup_loss_fn(target, add_noisy)
-
-                add_noisy = F.softmax(add_noisy, dim=1)
-                ax6.imshow(
-                    add_noisy[2].detach().cpu().numpy()[1]
-                    > add_noisy[2].detach().cpu().numpy()[0]
-                )
-                ax6.set_axis_off()
-                ax6.set_title("Add. Noise Mask")
-
                 # rotation
-                rot_noisy = image_ul.clone().detach()
                 rot = np.random.randint(0, 360)
-                rot_noisy = rotate(rot_noisy, rot)
-
-                ax7.imshow(rot_noisy[2].cpu().numpy().transpose(1, 2, 0))
-                ax7.set_axis_off()
-                ax7.set_title("Rotation")
-
-                rot_noisy = self.model(rot_noisy)
-                us_loss += self.unsup_loss_fn(rotate(target, rot), rot_noisy)
-
-                rot_noisy = F.softmax(rot_noisy, dim=1)
-                ax8.imshow(
-                    rot_noisy[2].detach().cpu().numpy()[1]
-                    > rot_noisy[2].detach().cpu().numpy()[0]
+                us_loss = unsup_iter(
+                    image_ul.clone().detach(),
+                    lambda x: rotate(x, rot),
+                    lambda x: rotate(x, -rot),
+                    target,
                 )
-                ax8.set_axis_off()
-                ax8.set_title("Rotation Mask")
 
                 # perspective warp
-                p_noisy = image_ul.clone().detach()
                 pwarp = RandomPerspective().get_params(
-                    p_noisy.shape[2], p_noisy.shape[3], 0.2
+                    target.shape[2], target.shape[3], 0.35
                 )
-                p_noisy = perspective(p_noisy, pwarp[0], pwarp[1])
-
-                ax9.imshow(p_noisy[2].cpu().numpy().transpose(1, 2, 0))
-                ax9.set_axis_off()
-                ax9.set_title("Perspective Warp")
-
-                p_noisy = self.model(p_noisy)
-                us_loss += self.unsup_loss_fn(
-                    perspective(target, pwarp[0], pwarp[1]), p_noisy
+                us_loss += unsup_iter(
+                    image_ul.clone().detach(),
+                    lambda x: perspective(x, pwarp[0], pwarp[1]),
+                    lambda x: perspective(x, pwarp[1], pwarp[0]),
+                    target,
                 )
-
-                p_noisy = F.softmax(p_noisy, dim=1)
-                ax10.imshow(
-                    p_noisy[2].detach().cpu().numpy()[1]
-                    > p_noisy[2].detach().cpu().numpy()[0]
-                )
-                ax10.set_axis_off()
-                ax10.set_title("Per. Warp Mask")
-
-                plt.savefig("./out/test.png")
-                plt.close()
 
                 loss += self.unsup_weight(self.curr_epoch) * us_loss
 
