@@ -13,6 +13,28 @@ import utils
 import namegenerator
 
 
+def plot(imgs, row_title=None, **imshow_kwargs):
+    # if not isinstance(imgs[0], list):
+    #     # Make a 2d grid even if there's just 1 row
+    #     imgs = [imgs]
+
+    num_rows = len(imgs)
+    num_cols = len(imgs[0])
+    fig, axs = plt.subplots(nrows=num_rows, ncols=num_cols, squeeze=False)
+    for row_idx, row in enumerate(imgs):
+        for col_idx, img in enumerate(row):
+            ax = axs[row_idx, col_idx]
+            ax.imshow(np.asarray(img), **imshow_kwargs)
+            ax.set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+    axs[0, 0].title.set_size(8)
+    if row_title is not None:
+        for row_idx in range(num_rows):
+            axs[row_idx, 0].set(ylabel=row_title[row_idx])
+
+    plt.tight_layout()
+
+
 class Trainer:
     def __init__(
         self,
@@ -63,7 +85,7 @@ class Trainer:
             self.curr_epoch = e
             self._train_epoch(mode=schedule(e))
             # self._train_epoch(mode="semi")
-            (images, masks), _ = next(iter(self.train_dataloader))
+            (images, masks), (_, _) = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
             self._valid_epoch()
@@ -86,7 +108,7 @@ class Trainer:
         tbar = tqdm(range(len(self.train_dataloader)), ncols=term_size.columns)
 
         for batch_idx in tbar:
-            (image_l, mask), image_ul = next(dataloader)
+            (image_l, mask), (image_ul, mask_ul) = next(dataloader)
             image_l = image_l.cuda(device=self.device, non_blocking=True)
             mask = mask.cuda(device=self.device, non_blocking=True)
 
@@ -98,12 +120,26 @@ class Trainer:
             # unsupervised section
             if mode == "semi":
 
-                def unsup_iter(image, func, inverse, target):
+                if batch_idx % 100 == 0:
+                    images = [None] * 4
+
+                def makebinary(mask):
+                    return (
+                        mask.detach().cpu().numpy()[1] > mask.detach().cpu().numpy()[0]
+                    )
+
+                def unsup_iter(image, func, target, out_arr, idx):
                     image = func(image)
+                    if out_arr:
+                        out_arr[idx] = [
+                            image[0].detach().cpu().numpy().transpose(1, 2, 0),
+                            None,
+                        ]
                     image = self.model(image)
-                    if inverse:
-                        image = inverse(image)
-                    return self.unsup_loss_fn(target, image)
+                    if out_arr:
+                        out_arr[idx][1] = makebinary(F.softmax(image[0], dim=0))
+
+                    return self.unsup_loss_fn(func(target), image), out_arr
 
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
@@ -112,25 +148,42 @@ class Trainer:
                 target = self.model(target)
                 target = F.softmax(target, dim=1)
 
+                if batch_idx % 100 == 0:
+                    images[0] = [
+                        image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
+                        mask_ul[0].detach().cpu().numpy().squeeze(),
+                    ]
+                    images[1] = [
+                        image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
+                        makebinary(target[0]),
+                    ]
+
                 # rotation
-                rot = np.random.randint(0, 360)
-                us_loss = unsup_iter(
+                rot = np.random.randint(0, 4) * 90
+                us_loss, images = unsup_iter(
                     image_ul.clone().detach(),
                     lambda x: rotate(x, rot),
-                    lambda x: rotate(x, -rot),
                     target,
+                    images,
+                    2,
                 )
 
                 # perspective warp
                 pwarp = RandomPerspective().get_params(
-                    target.shape[2], target.shape[3], 0.35
+                    target.shape[2], target.shape[3], 0.25
                 )
-                us_loss += unsup_iter(
+                pw_loss, images = unsup_iter(
                     image_ul.clone().detach(),
                     lambda x: perspective(x, pwarp[0], pwarp[1]),
-                    lambda x: perspective(x, pwarp[1], pwarp[0]),
                     target,
+                    images,
+                    3,
                 )
+                us_loss += pw_loss
+
+                if batch_idx % 100 == 0:
+                    plot(images, ["Original", "Target", "Rotation", "Persp. Warp"])
+                    plt.savefig(f"./out/{self.name}/unsup_masks__{self.curr_epoch}_{batch_idx}.png")
 
                 loss += self.unsup_weight(self.curr_epoch) * us_loss
 

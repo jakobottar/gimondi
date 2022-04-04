@@ -40,7 +40,7 @@ if __name__ == "__main__":
     sup_dataset = dataset.SegmentationImageDataset(
         "./data/train_supervised.csv", rotate=True, flip=True
     )
-    unsup_dataset = dataset.UnsupervisedSegmentationDataset(
+    unsup_dataset = dataset.SegmentationImageDataset(
         "./data/train_unsupervised.csv", rotate=True, flip=True
     )
 
