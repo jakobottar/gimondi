@@ -183,7 +183,7 @@ if __name__ == "__main__":
     )
     dataset = pd.read_csv(dataset_file)
 
-    sup_ix = 5
+    sup_ix = 10
     unsup_ix = 46
 
     dataset.sample(frac=1).reset_index(drop=True)

@@ -52,7 +52,7 @@ class Trainer:
         self.valid_dataloader = validation_dataloader
         self.optimizer = optimizer
         self.sup_loss_fn = loss
-        self.unsup_loss_fn = torch.nn.MSELoss()
+        self.unsup_loss_fn = torch.nn.CrossEntropyLoss()
 
         if name:
             self.name = name
@@ -84,7 +84,7 @@ class Trainer:
         for e in range(epochs):
             self.curr_epoch = e
             self._train_epoch(mode=schedule(e))
-            # self._train_epoch(mode="semi")
+            # self._train_epoch(mode="super")
             (images, masks), (_, _) = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
@@ -123,6 +123,12 @@ class Trainer:
                 if batch_idx % 100 == 0:
                     images = [None] * 4
 
+                def greaterthan(x):
+                    out = torch.ones((3,1,512,512),dtype = int, device = x.device)
+                    for img in range(len(x)):
+                        out[img] = x[img][1] > x[img][0]
+                    return out
+
                 def makebinary(mask):
                     return (
                         mask.detach().cpu().numpy()[1] > mask.detach().cpu().numpy()[0]
@@ -139,14 +145,14 @@ class Trainer:
                     if out_arr:
                         out_arr[idx][1] = makebinary(F.softmax(image[0], dim=0))
 
-                    return self.unsup_loss_fn(image, func(target)), out_arr
+                    return self.unsup_loss_fn(image, func(target.squeeze(1))), out_arr
 
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
                 # make target mask
                 target = image_ul.clone().detach()
                 target = self.model(target)
-                target = F.softmax(target, dim=1)
+                target = greaterthan(F.softmax(target, dim=1))
                 # target = mask_ul.to(image_ul.device)
 
                 if batch_idx % 100 == 0:
@@ -156,7 +162,8 @@ class Trainer:
                     ]
                     images[1] = [
                         image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
-                        makebinary(target),
+                        # makebinary(target[0]),
+                        target[0].detach().cpu().numpy().squeeze(),
                     ]
 
                 # rotation
@@ -185,8 +192,9 @@ class Trainer:
                 if batch_idx % 100 == 0:
                     plot(images, ["Original", "Target", "Rotation", "Persp. Warp"])
                     plt.savefig(
-                        f"./out/{self.name}/unsup_masks__{self.curr_epoch}_{batch_idx}.png"
+                        f"./out/{self.name}/unsup_masks_{self.curr_epoch}_{batch_idx}.png"
                     )
+                    plt.close()
 
                 loss += self.unsup_weight(self.curr_epoch) * us_loss
 
