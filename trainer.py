@@ -139,7 +139,7 @@ class Trainer:
                     if out_arr:
                         out_arr[idx][1] = makebinary(F.softmax(image[0], dim=0))
 
-                    return self.unsup_loss_fn(func(target), image), out_arr
+                    return self.unsup_loss_fn(image, func(target)), out_arr
 
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
@@ -147,6 +147,7 @@ class Trainer:
                 target = image_ul.clone().detach()
                 target = self.model(target)
                 target = F.softmax(target, dim=1)
+                # target = mask_ul.to(image_ul.device)
 
                 if batch_idx % 100 == 0:
                     images[0] = [
@@ -155,7 +156,7 @@ class Trainer:
                     ]
                     images[1] = [
                         image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
-                        makebinary(target[0]),
+                        makebinary(target),
                     ]
 
                 # rotation
@@ -183,7 +184,9 @@ class Trainer:
 
                 if batch_idx % 100 == 0:
                     plot(images, ["Original", "Target", "Rotation", "Persp. Warp"])
-                    plt.savefig(f"./out/{self.name}/unsup_masks__{self.curr_epoch}_{batch_idx}.png")
+                    plt.savefig(
+                        f"./out/{self.name}/unsup_masks__{self.curr_epoch}_{batch_idx}.png"
+                    )
 
                 loss += self.unsup_weight(self.curr_epoch) * us_loss
 
