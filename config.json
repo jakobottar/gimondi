@@ -1,0 +1,13 @@
+{
+    "num_epochs": 5,
+    "num_gpus": 1,
+    "lr": 0.01,
+    "weight_decay": 0.1,
+    "batch_size": 3,
+    "data_files": {
+        "valid": "./data/test.csv",
+        "labeled": "./data/train_supervised.csv",
+        "unlabeled": "./data/train_unsupervised.csv"
+    },
+    "mode": "semisupervised"
+}

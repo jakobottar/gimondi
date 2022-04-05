@@ -7,7 +7,7 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 import numpy as np
 import pynvml
-from torchvision.transforms import ColorJitter, RandomPerspective
+from torchvision.transforms import RandomPerspective
 from torchvision.transforms.functional import rotate, perspective
 import utils
 import namegenerator
@@ -44,7 +44,7 @@ class Trainer:
         loss,
         optimizer,
         n_gpu=2,
-        mode="semi",
+        mode="semisupervised",
         name="None",
     ) -> None:
         self.model = model
@@ -66,6 +66,11 @@ class Trainer:
         self.curr_epoch = 0
         self.unsup_weight = lambda e: min(e * 1e-4, 0.03)
 
+        if mode == "semisupervised":
+            self.schedule = lambda e: "super" if (e < 5 or e % 2 == 0) else "semi"
+        else:
+            self.schedule = lambda e: "super"
+
         # set device
         # TODO: migrate to DistributedDataParallel
         self.device, gpu_ids = self._get_available_devices(n_gpu)
@@ -73,25 +78,26 @@ class Trainer:
         self.model = torch.nn.DataParallel(self.model, device_ids=gpu_ids)
 
     def train(self, epochs: int):
-        def schedule(e):
-            if e < 5:
-                return "super"
-            if e % 2 == 1:
-                return "semi"
-            return "super"
 
         print(f"training for {epochs} epochs: ")
         for e in range(epochs):
+            # set current epoch num
             self.curr_epoch = e
-            self._train_epoch(mode=schedule(e))
-            # self._train_epoch(mode="super")
+            # train for one epoch
+            self._train_epoch(mode=self.schedule(e))
+
+            # generate and save example images from training dataset
             (images, masks), (_, _) = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
+            # validation epoch
             self._valid_epoch()
+
+            # generate and save images from validation dataset
             images, masks = next(iter(self.valid_dataloader))
             self._example_image(images, masks, prefix="valid")
 
+            # save the current state as a checkpoint
             torch.save(
                 self.model.module.state_dict(), f"./out/{self.name}/chkpt_{e}.pth"
             )
@@ -124,7 +130,7 @@ class Trainer:
                     images = [None] * 4
 
                 def greaterthan(x):
-                    out = torch.ones((3,1,512,512),dtype = int, device = x.device)
+                    out = torch.ones((3, 1, 512, 512), dtype=int, device=x.device)
                     for img in range(len(x)):
                         out[img] = x[img][1] > x[img][0]
                     return out
@@ -153,7 +159,6 @@ class Trainer:
                 target = image_ul.clone().detach()
                 target = self.model(target)
                 target = greaterthan(F.softmax(target, dim=1))
-                # target = mask_ul.to(image_ul.device)
 
                 if batch_idx % 100 == 0:
                     images[0] = [
@@ -162,7 +167,6 @@ class Trainer:
                     ]
                     images[1] = [
                         image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
-                        # makebinary(target[0]),
                         target[0].detach().cpu().numpy().squeeze(),
                     ]
 
@@ -256,7 +260,6 @@ class Trainer:
                 mask = mask.cuda(device=self.device, non_blocking=True)
 
                 preds = self.model(image)
-                # loss = self.sup_loss_fn(preds, mask.squeeze(1).long())
                 TPR, FPR, IoU = 0, 0, 0
                 for i in range(preds.shape[0]):
                     predi = preds.cpu().numpy()[i][1] > preds.cpu().numpy()[i][0]
@@ -337,7 +340,7 @@ class Trainer:
         for id in range(sys_gpu):
             h = pynvml.nvmlDeviceGetHandleByIndex(id)
             info = pynvml.nvmlDeviceGetMemoryInfo(h)
-            # print(id, info)
+
             # if the memory is more than 97.5% unused, we'll assume the GPU is free.
             if (info.free / info.total) > 0.975:
                 free_gpus.append(id)

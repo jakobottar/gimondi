@@ -2,8 +2,8 @@ from itertools import cycle
 
 
 class SemiSupervisedDataLoader:
-    def __init__(self, sup_dataloader, unsup_dataloader, mode="semi"):
-        if mode == "semi":
+    def __init__(self, sup_dataloader, unsup_dataloader, mode="semisupervised"):
+        if mode == "semisupervised":
             self._len = max(len(sup_dataloader), len(unsup_dataloader))
         else:
             self._len = len(sup_dataloader)
@@ -15,7 +15,7 @@ class SemiSupervisedDataLoader:
         self._unsup_it = None
 
     def __iter__(self):
-        if self.mode == "semi":
+        if self.mode == "semisupervised":
             if len(self._unsup) > len(self._sup):
                 self._sup_it = cycle(self._sup)
                 self._unsup_it = iter(self._unsup)
@@ -31,7 +31,7 @@ class SemiSupervisedDataLoader:
         r"""
         Returns a tuple of the form (Labeled Item, Unlabeled Item)
         """
-        if self.mode == "semi":
+        if self.mode == "semisupervised":
             return (next(self._sup_it), next(self._unsup_it))
         else:
             return (next(self._sup_it), None)

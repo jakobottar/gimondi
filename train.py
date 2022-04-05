@@ -1,4 +1,5 @@
 import argparse
+import json
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -12,63 +13,54 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-e",
-        "--epochs",
-        type=int,
-        default=5,
-        help="number of training epochs (default: 5)",
-    )
-    parser.add_argument(
-        "-g",
-        "--n-gpus",
-        type=int,
-        default=2,
-        help="max number of GPUs to use (default: 2)",
-    )
-    parser.add_argument(
-        "-m", "--mode", type=str, default="semi", help="model mode (default: semi)"
+        "-c",
+        "--config",
+        type=str,
+        default="./config.json",
+        help="config file location (default: config.json)",
     )
     parser.add_argument(
         "-n", "--name", type=str, default=None, help="model name (default: random name)"
     )
-    parser.add_argument(
-        "-p", "--pretrained", type=str, default=None, help="add a pretrained model here"
-    )
     FLAGS = parser.parse_args()
 
-    test_dataset = dataset.SegmentationImageDataset("./data/test.csv")
+    with open(FLAGS.config) as file:
+        config = json.load(file)
+
+    test_dataset = dataset.SegmentationImageDataset(config["data_files"]["valid"])
     sup_dataset = dataset.SegmentationImageDataset(
-        "./data/train_supervised.csv", rotate=True, flip=True
+        config["data_files"]["labeled"], rotate=True, flip=True
     )
     unsup_dataset = dataset.SegmentationImageDataset(
-        "./data/train_unsupervised.csv", rotate=True, flip=True
+        config["data_files"]["unlabeled"], rotate=True, flip=True
     )
 
     print(
-        f"datasets loaded:\n    {len(sup_dataset)} labeled examples\n    {len(unsup_dataset)} unlabeled examples\n    {len(test_dataset)} testing examples"
+        f"datasets loaded:\n\
+    {len(sup_dataset)} labeled examples\n\
+    {len(unsup_dataset)} unlabeled examples\n\
+    {len(test_dataset)} testing examples"
     )
 
-    batch_size = 3
     test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=True)
-    sup_dataloader = DataLoader(sup_dataset, batch_size=batch_size, shuffle=True)
-    if FLAGS.mode == "semi":
+    sup_dataloader = DataLoader(
+        sup_dataset, batch_size=config["batch_size"], shuffle=True
+    )
+    if config["mode"] == "semisupervised":
         unsup_dataloader = DataLoader(
-            unsup_dataset, batch_size=batch_size, shuffle=True
+            unsup_dataset, batch_size=config["batch_size"], shuffle=True
         )
     else:
         unsup_dataloader = None
     dataloader = utils.SemiSupervisedDataLoader(
-        sup_dataloader, unsup_dataloader, FLAGS.mode
+        sup_dataloader, unsup_dataloader, config["mode"]
     )
 
     net = UNet()
-    if FLAGS.pretrained:
-        # load pretrained model, map_location puts it on CPU on load.
-        net.load_state_dict(
-            torch.load(FLAGS.pretrained, map_location=torch.device("cpu"))
-        )
 
-    optimizer = torch.optim.AdamW(net.parameters(), lr=0.01, weight_decay=0.1)
+    optimizer = torch.optim.AdamW(
+        net.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
+    )
     loss = nn.CrossEntropyLoss()
 
     net_trainer = trainer.Trainer(
@@ -77,10 +69,10 @@ if __name__ == "__main__":
         test_dataloader,
         loss,
         optimizer,
-        FLAGS.n_gpus,
-        FLAGS.mode,
+        config["num_gpus"],
+        config["mode"],
         FLAGS.name,
     )
-    net_trainer.train(epochs=FLAGS.epochs)
+    net_trainer.train(epochs=config["num_epochs"])
 
     print("done!")
