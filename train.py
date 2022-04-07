@@ -31,14 +31,19 @@ if __name__ == "__main__":
     sup_dataset = dataset.SegmentationImageDataset(
         config["data_files"]["labeled"], rotate=True, flip=True
     )
-    unsup_dataset = dataset.SegmentationImageDataset(
-        config["data_files"]["unlabeled"], rotate=True, flip=True
-    )
+    if config["mode"] == "semisupervised":
+        unsup_dataset = dataset.SegmentationImageDataset(
+            config["data_files"]["unlabeled"], rotate=True, flip=True
+        )
+        len_unsup_dataset = len(unsup_dataset)
+    else:
+        unsup_dataset = None
+        len_unsup_dataset = 0
 
     print(
         f"datasets loaded:\n\
     {len(sup_dataset)} labeled examples\n\
-    {len(unsup_dataset)} unlabeled examples\n\
+    {len_unsup_dataset} unlabeled examples\n\
     {len(test_dataset)} testing examples"
     )
 

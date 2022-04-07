@@ -14,10 +14,6 @@ import namegenerator
 
 
 def plot(imgs, row_title=None, **imshow_kwargs):
-    # if not isinstance(imgs[0], list):
-    #     # Make a 2d grid even if there's just 1 row
-    #     imgs = [imgs]
-
     num_rows = len(imgs)
     num_cols = len(imgs[0])
     fig, axs = plt.subplots(nrows=num_rows, ncols=num_cols, squeeze=False)
@@ -87,7 +83,7 @@ class Trainer:
             self._train_epoch(mode=self.schedule(e))
 
             # generate and save example images from training dataset
-            (images, masks), (_, _) = next(iter(self.train_dataloader))
+            (images, masks), _ = next(iter(self.train_dataloader))
             self._example_image(images, masks, prefix="train")
 
             # validation epoch
@@ -114,7 +110,7 @@ class Trainer:
         tbar = tqdm(range(len(self.train_dataloader)), ncols=term_size.columns)
 
         for batch_idx in tbar:
-            (image_l, mask), (image_ul, mask_ul) = next(dataloader)
+            (image_l, mask), ul = next(dataloader)
             image_l = image_l.cuda(device=self.device, non_blocking=True)
             mask = mask.cuda(device=self.device, non_blocking=True)
 
@@ -125,6 +121,8 @@ class Trainer:
 
             # unsupervised section
             if mode == "semi":
+                (image_ul, mask_ul) = ul
+                image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
                 if batch_idx % 100 == 0:
                     images = [None] * 4
@@ -152,8 +150,6 @@ class Trainer:
                         out_arr[idx][1] = makebinary(F.softmax(image[0], dim=0))
 
                     return self.unsup_loss_fn(image, func(target.squeeze(1))), out_arr
-
-                image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
                 # make target mask
                 target = image_ul.clone().detach()
@@ -264,7 +260,7 @@ class Trainer:
                 for i in range(preds.shape[0]):
                     predi = preds.cpu().numpy()[i][1] > preds.cpu().numpy()[i][0]
                     TPRi, FPRi, IoUi, _, _ = utils.qScore(
-                        predi, mask.squeeze(1).cpu().numpy()[i], cat="particle"
+                        predi, mask.squeeze(1).cpu().numpy()[i], cat="pixel"
                     )
                     TPR += TPRi
                     FPR += FPRi

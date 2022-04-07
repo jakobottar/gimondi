@@ -183,14 +183,17 @@ if __name__ == "__main__":
     )
     dataset = pd.read_csv(dataset_file)
 
-    sup_ix = 10
+    sup_ix = 1
     unsup_ix = 46
 
-    dataset.sample(frac=1).reset_index(drop=True)
+    dataset = dataset.sample(frac=1).reset_index(drop=True)
 
     supervised = dataset.iloc[0:sup_ix]
     unsupervised = dataset.iloc[sup_ix:unsup_ix]
     validation = dataset.iloc[unsup_ix:]
+
+    for i, x in enumerate(validation["image_file"]):
+        print(x)
 
     # unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/uo3-unsegmented/data.csv"
     # unsegmented_file = "/usr/sci/projs/DeepLearning/Jakob_Dataset/nfs-segmentation/u3o8-unsegmented/data.csv"
@@ -204,25 +207,43 @@ if __name__ == "__main__":
         None
 
     # feed into preprocessor
-    with open("./data/test.csv", "w") as f:
+    with open("./data/u3o8_test_1.csv", "w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            validation, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "valid_u3o8"
+            validation,
+            csvwriter,
+            30,
+            512,
+            512,
+            "/scratch/jakobj/u3o8_1/",
+            "valid_u3o8",
         )
 
-    with open("./data/train_supervised.csv", "w") as f:
+    with open("./data/u3o8_train_1_supervised.csv", "w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            supervised, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "sup_u3o8"
+            supervised,
+            csvwriter,
+            30,
+            512,
+            512,
+            "/scratch/jakobj/u3o8_1/",
+            "sup_u3o8",
         )
 
-    with open("./data/train_unsupervised.csv", "w") as f:
+    with open("./data/u3o8_train_1_unsupervised.csv", "w") as f:
         csvwriter = csv.writer(f)
         csvwriter.writerow(["image_file", "mask_file"])
         Preprocess(
-            unsupervised, csvwriter, 30, 512, 512, "/scratch/jakobj/u3o8/", "unsup_u3o8"
+            unsupervised,
+            csvwriter,
+            30,
+            512,
+            512,
+            "/scratch/jakobj/u3o8_1/",
+            "unsup_u3o8",
         )
 
     print("finished preprocessing raw images.")

@@ -4,5 +4,6 @@ temp/*
 out/*
 runs/*
 data/*
+configs/*
 *.pth
 .vscode
