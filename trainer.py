@@ -60,10 +60,10 @@ class Trainer:
         os.makedirs(f"./out/{self.name}/", exist_ok=True)
 
         self.curr_epoch = 0
-        self.unsup_weight = lambda e: min(e * 1e-4, 0.03)
+        self.unsup_weight = lambda e: min(e * 2e-3, 0.06)
 
         if mode == "semisupervised":
-            self.schedule = lambda e: "super" if (e < 5 or e % 2 == 0) else "semi"
+            self.schedule = lambda e: "super" if (e < 5 or e % 3 == 0) else "semi"
         else:
             self.schedule = lambda e: "super"
 
@@ -128,7 +128,9 @@ class Trainer:
                     images = [None] * 4
 
                 def greaterthan(x):
-                    out = torch.ones((3, 1, 512, 512), dtype=int, device=x.device)
+                    out = torch.ones(
+                        (x.shape[0], 1, 512, 512), dtype=int, device=x.device
+                    )
                     for img in range(len(x)):
                         out[img] = x[img][1] > x[img][0]
                     return out
@@ -178,7 +180,7 @@ class Trainer:
 
                 # perspective warp
                 pwarp = RandomPerspective().get_params(
-                    target.shape[2], target.shape[3], 0.25
+                    target.shape[2], target.shape[3], 0.15
                 )
                 pw_loss, images = unsup_iter(
                     image_ul.clone().detach(),
