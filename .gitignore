@@ -7,3 +7,4 @@ data/*
 configs/*
 *.pth
 .vscode
+data-runs/*
