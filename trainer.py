@@ -124,9 +124,10 @@ class Trainer:
                 (image_ul, mask_ul) = ul
                 image_ul = image_ul.cuda(device=self.device, non_blocking=True)
 
-                # if batch_idx % 100 == 0:
-                #     images = [None] * 4
-                images = None
+                if batch_idx % 100 == 0:
+                    images = [None] * 4
+                else: 
+                    images = None
 
                 def greaterthan(x):
                     out = torch.ones(
@@ -159,15 +160,15 @@ class Trainer:
                 target = self.model(target)
                 target = greaterthan(F.softmax(target, dim=1))
 
-                # if batch_idx % 100 == 0:
-                #     images[0] = [
-                #         image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
-                #         mask_ul[0].detach().cpu().numpy().squeeze(),
-                #     ]
-                #     images[1] = [
-                #         image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
-                #         target[0].detach().cpu().numpy().squeeze(),
-                #     ]
+                if batch_idx % 100 == 0:
+                    images[0] = [
+                        image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
+                        mask_ul[0].detach().cpu().numpy().squeeze(),
+                    ]
+                    images[1] = [
+                        image_ul[0].detach().cpu().numpy().transpose(1, 2, 0),
+                        target[0].detach().cpu().numpy().squeeze(),
+                    ]
 
                 # rotation
                 rot = np.random.randint(0, 4) * 90
@@ -192,12 +193,12 @@ class Trainer:
                 )
                 us_loss += pw_loss
 
-                # if batch_idx % 100 == 0:
-                #     plot(images, ["Original", "Target", "Rotation", "Persp. Warp"])
-                #     plt.savefig(
-                #         f"./out/{self.name}/unsup_masks_{self.curr_epoch}_{batch_idx}.png"
-                #     )
-                #     plt.close()
+                if batch_idx % 100 == 0:
+                    plot(images, ["Original", "Pseudolabel", "Rotation", "Persp. Warp"])
+                    plt.savefig(
+                        f"./out/{self.name}/unsup_masks_{self.curr_epoch}_{batch_idx}.png"
+                    )
+                    plt.close()
 
                 loss += self.unsup_weight(self.curr_epoch) * us_loss
 
